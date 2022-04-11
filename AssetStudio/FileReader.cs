@@ -13,14 +13,55 @@ namespace AssetStudio
         private static readonly byte[] brotliMagic = { 0x62, 0x72, 0x6F, 0x74, 0x6C, 0x69 };
         private static readonly byte[] zipMagic = { 0x50, 0x4B, 0x03, 0x04 };
         private static readonly byte[] zipSpannedMagic = { 0x50, 0x4B, 0x07, 0x08 };
+        private static readonly byte[] zstdMagic = { 0x28, 0xB5, 0x2F, 0xFD };
 
-        public FileReader(string path) : this(path, File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)) { }
+        //public FileReader(string path) : this(path, File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)) { }
+        public FileReader(string path) : this(path, zstdCheckStream(path)) { }
 
         public FileReader(string path, Stream stream) : base(stream, EndianType.BigEndian)
         {
             FullPath = Path.GetFullPath(path);
             FileName = Path.GetFileName(path);
             FileType = CheckFileType();
+        }
+
+        private static Stream zstdCheckStream(string path)
+        {
+            Stream stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            if (IsZstd(stream))
+            {
+                var decompressor = new ZstdNet.Decompressor();
+                var data = decompressor.Unwrap(GetBytes(stream));
+                stream.Dispose();
+                stream = new MemoryStream(data, false);
+            }
+            return stream;
+        }
+
+        private static byte[] GetBytes(Stream stream)
+        {
+            int len = (int)stream.Length;
+            int pos = 0;
+
+            var bytes = new byte[len];
+
+            while (len > 0)
+            {
+                int n = stream.Read(bytes, pos, len);
+                if (n == 0)
+                    break;
+                pos += n;
+                len -= n;
+            }
+            return bytes;
+        }
+
+        private static bool IsZstd(Stream stream)
+        {
+            var magic = new byte[zipMagic.Length];
+            stream.Read(magic, 0, magic.Length);
+            stream.Seek(0, SeekOrigin.Begin);
+            return zstdMagic.SequenceEqual(magic);
         }
 
         private FileType CheckFileType()
